@@ -1,0 +1,471 @@
+<!--
+README (top of file):
+Interactive Constellations — single-file demo
+How to run: Save this file as `index.html` and open it in any modern browser. No build tools required.
+How to add constellations: In the <script> section, at the top, edit the `CONSTELLATIONS` array. Each constellation object must follow:
+{ id, name, description, color?, stars: [{x,y,size,magnitude?}], connections: [[i,j], ...] }
+Coordinates x,y are normalized (0..1) relative to the canvas size.
+
+This demo provides keyboard navigation, hover highlight, click/tap to open an info panel, a search box, and a labels toggle.
+
+Author: Generated for user request. Enjoy!
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Interactive Constellations</title>
+  <style>
+    /* styles.css embedded */
+    :root{--bg:#000;--panel:#0b0b0b;--muted:#9aa0a6;}
+    html,body{height:100%;margin:0;background:var(--bg);color:#eee;font-family:system-ui,Segoe UI,Roboto,Arial;}
+    #app{position:relative;height:100vh;overflow:hidden}
+    canvas{display:block;position:absolute;inset:0;width:100%;height:100%;}
+
+    /* UI controls */
+    .controls{position:fixed;left:12px;top:12px;background:rgba(255,255,255,0.03);backdrop-filter:blur(6px);padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04)}
+    .controls input[type=text]{background:transparent;border:1px solid rgba(255,255,255,0.06);color:#fff;padding:6px;border-radius:6px;width:180px}
+    .controls label{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+
+    /* Fallback list if canvas not supported */
+    #fallback{display:none;padding:16px;color:#fff}
+    #fallback ul{list-style:none;padding:0}
+    #fallback li{margin:6px 0}
+
+    /* Info panel/modal */
+    .panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(0.98);min-width:320px;max-width:720px;background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));border-radius:12px;padding:14px;border:1px solid rgba(255,255,255,0.06);box-shadow:0 8px 40px rgba(0,0,0,0.7);opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease}
+    .panel.open{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+    .panel h2{margin:6px 0 4px;font-size:20px}
+    .panel .desc{color:var(--muted);font-size:14px;margin-bottom:8px}
+    .panel .meta{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+    .panel canvas{width:140px;height:80px;border-radius:6px;background:transparent;}
+    .panel .close{margin-left:auto;background:transparent;border:1px solid rgba(255,255,255,0.06);padding:6px 10px;border-radius:8px;color:#fff}
+
+    /* Focus styles for keyboard nav */
+    .constellation-focus{outline:2px solid rgba(255,255,255,0.12);outline-offset:6px;border-radius:6px}
+
+    /* Small helper styles */
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+    /* responsive adjustments */
+    @media (max-width:480px){.controls{left:8px;top:8px;padding:6px}.controls input[type=text]{width:120px}.panel{width:92vw}}
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- Two layered canvases: background particles and main constellations -->
+    <canvas id="bgCanvas" aria-hidden="true"></canvas>
+    <canvas id="mainCanvas"></canvas>
+
+    <!-- Controls: search + labels toggle -->
+    <div class="controls" role="region" aria-label="Controls">
+      <input id="search" type="text" placeholder="Search constellations" aria-label="Search constellations" />
+      <label for="labelsToggle"><input id="labelsToggle" type="checkbox" /> Labels</label>
+    </div>
+
+    <!-- Fallback list if canvas not supported -->
+    <div id="fallback" role="region">
+      <p>Canvas not supported. Use the list below to open constellation info.</p>
+      <ul id="fallbackList"></ul>
+    </div>
+
+    <!-- Info panel (hidden initially) -->
+    <div id="infoPanel" class="panel" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="panelTitle">
+      <div style="display:flex;align-items:flex-start;gap:12px;">
+        <div style="flex:1">
+          <h2 id="panelTitle">Constellation</h2>
+          <div class="desc" id="panelDesc">Description</div>
+          <div class="meta"><div id="panelStars">Stars: 0</div><div id="panelId"></div></div>
+        </div>
+        <canvas id="thumbCanvas" width="280" height="160" aria-hidden="true"></canvas>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button id="closePanel" class="close">Close</button>
+        <div style="flex:1"></div>
+      </div>
+    </div>
+
+    <div id="a11yHints" class="sr-only" aria-live="polite"></div>
+  </div>
+
+  <script>
+  /* app.js embedded
+     Top of JS: constellation data and README notes
+     - CONSTELLATIONS: array of constellation objects with normalized coordinates
+     - Use addConstellation(obj) to programmatically add and re-render
+  */
+
+  // ====== CONSTELLATIONS DATA (normalized coordinates 0..1) ======
+  const CONSTELLATIONS = [
+    {
+      id: "orion",
+      name: "Orion",
+      description: "A prominent winter constellation representing a hunter; notable for Orion's Belt of three aligned stars.",
+      color: '#7ee3ff',
+      stars: [
+        {x:0.48,y:0.42,size:3}, // central
+        {x:0.45,y:0.35,size:3},
+        {x:0.50,y:0.30,size:2.5},
+        {x:0.55,y:0.40,size:2},
+        {x:0.42,y:0.42,size:2}
+      ],
+      connections:[[0,1],[0,2],[0,3],[1,4]]
+    },
+    {
+      id: "ursa_major",
+      name: "Ursa Major",
+      description: "Known as the Great Bear; contains the Big Dipper asterism useful for navigation.",
+      color:'#ffd27f',
+      stars:[{x:0.12,y:0.25,size:2.4},{x:0.18,y:0.28,size:2.2},{x:0.22,y:0.23,size:2.8},{x:0.26,y:0.30,size:2},{x:0.30,y:0.26,size:2.6},{x:0.35,y:0.29,size:2}],
+      connections:[[0,1],[1,2],[2,3],[3,4],[4,5]]
+    },
+    {
+      id:'cassiopeia',name:'Cassiopeia',description:'A W-shaped queen constellation high in the northern sky.',color:'#c7a0ff',
+      stars:[{x:0.6,y:0.12,size:2.2},{x:0.63,y:0.18,size:2},{x:0.66,y:0.14,size:2.6},{x:0.69,y:0.19,size:2.1},{x:0.73,y:0.15,size:2}],
+      connections:[[0,1],[1,2],[2,3],[3,4]]
+    },
+    { id:'lyra', name:'Lyra', description:'Small constellation containing Vega, one of the brightest stars.', color:'#9fffbf',
+      stars:[{x:0.78,y:0.45,size:2.6},{x:0.80,y:0.5,size:2},{x:0.82,y:0.46,size:1.8}], connections:[[0,1],[1,2]] },
+    { id:'cygnus', name:'Cygnus', description:'The Swan, flying along the Milky Way with its bright star Deneb.', color:'#a0d8ff',
+      stars:[{x:0.55,y:0.62,size:2.6},{x:0.58,y:0.56,size:2.4},{x:0.52,y:0.58,size:2},{x:0.60,y:0.68,size:2}], connections:[[0,1],[1,2],[1,3]] },
+    { id:'scorpius', name:'Scorpius', description:'A summer constellation with a curved tail and the red star Antares.', color:'#ff9aa2',
+      stars:[{x:0.25,y:0.65,size:2.4},{x:0.28,y:0.68,size:2},{x:0.32,y:0.72,size:1.8},{x:0.36,y:0.70,size:2.1},{x:0.40,y:0.74,size:2}], connections:[[0,1],[1,2],[2,3],[3,4]]},
+    { id:'taurus', name:'Taurus', description:'The Bull, contains the bright star Aldebaran and the Pleiades cluster.', color:'#ffd2f0',
+      stars:[{x:0.15,y:0.5,size:2.6},{x:0.18,y:0.56,size:2},{x:0.22,y:0.52,size:2.1}], connections:[[0,1],[1,2]]},
+    { id:'gemini', name:'Gemini', description:'The twins; two bright stars Castor and Pollux mark the heads.', color:'#aaffc3',
+      stars:[{x:0.43,y:0.12,size:2.6},{x:0.47,y:0.18,size:2.6},{x:0.41,y:0.18,size:1.9}], connections:[[0,1],[1,2]]},
+    { id:'leo', name:'Leo', description:'The Lion, visible in spring, with a distinctive sickle-shaped pattern.', color:'#ffd9a3',
+      stars:[{x:0.7,y:0.35,size:2.4},{x:0.74,y:0.32,size:2.2},{x:0.76,y:0.37,size:2.0},{x:0.72,y:0.4,size:1.8}], connections:[[0,1],[1,2],[2,3]]},
+    { id:'andromeda', name:'Andromeda', description:'Contains the Andromeda Galaxy (M31) visible as a faint patch.', color:'#d7f3ff',
+      stars:[{x:0.84,y:0.62,size:2.2},{x:0.88,y:0.58,size:2.0},{x:0.86,y:0.66,size:1.9}], connections:[[0,1],[1,2]]}
+  ];
+
+  // ====== Simple helper: deep copy of data for runtime use ======
+  let constellations = JSON.parse(JSON.stringify(CONSTELLATIONS));
+
+  // ====== Core variables and setup ======
+  const app = document.getElementById('app');
+  const mainCanvas = document.getElementById('mainCanvas');
+  const bgCanvas = document.getElementById('bgCanvas');
+  const infoPanel = document.getElementById('infoPanel');
+  const panelTitle = document.getElementById('panelTitle');
+  const panelDesc = document.getElementById('panelDesc');
+  const panelStars = document.getElementById('panelStars');
+  const panelId = document.getElementById('panelId');
+  const thumbCanvas = document.getElementById('thumbCanvas');
+  const closePanelBtn = document.getElementById('closePanel');
+  const searchInput = document.getElementById('search');
+  const labelsToggle = document.getElementById('labelsToggle');
+  const fallback = document.getElementById('fallback');
+  const fallbackList = document.getElementById('fallbackList');
+  const a11yHints = document.getElementById('a11yHints');
+
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  let w=0,h=0;
+  const mainCtx = mainCanvas.getContext('2d');
+  const bgCtx = bgCanvas.getContext('2d');
+  const thumbCtx = thumbCanvas.getContext('2d');
+
+  // Render state
+  let hovered = null; // id of hovered constellation
+  let focusedIndex = -1; // keyboard focus index in filtered list
+  let openConstId = null; // id of opened panel
+  let needsRedraw = true; // only redraw when needed
+
+  // Particle field for subtle background
+  const particles = [];
+
+  // Precompute hit areas (in pixels) for each star on resize
+  function recomputeMetrics(){
+    w = Math.max(300, app.clientWidth);
+    h = Math.max(200, app.clientHeight);
+    mainCanvas.width = Math.round(w * dpr);
+    mainCanvas.height = Math.round(h * dpr);
+    mainCanvas.style.width = w + 'px';
+    mainCanvas.style.height = h + 'px';
+    mainCtx.setTransform(dpr,0,0,dpr,0,0);
+
+    bgCanvas.width = Math.round(w * dpr);
+    bgCanvas.height = Math.round(h * dpr);
+    bgCanvas.style.width = w + 'px';
+    bgCanvas.style.height = h + 'px';
+    bgCtx.setTransform(dpr,0,0,dpr,0,0);
+
+    // Thumb canvas uses internal size but CSS dimensions already set
+    thumbCanvas.width = 280 * dpr;
+    thumbCanvas.height = 160 * dpr;
+    thumbCtx.setTransform(dpr,0,0,dpr,0,0);
+
+    // build particle positions
+    particles.length = 0;
+    const num = Math.round((w*h)/9000);
+    for(let i=0;i<num;i++) particles.push({x:Math.random()*w,y:Math.random()*h,r:Math.random()*1.2,alpha:Math.random()*0.7+0.2,phase:Math.random()*Math.PI*2});
+
+    // compute pixel coords for stars
+    for(const c of constellations){
+      c._pxStars = c.stars.map(s=>({x:s.x*w,y:s.y*h,size:s.size,orig:s}));
+    }
+
+    needsRedraw = true;
+  }
+
+  // ====== Utilities: distance and segment distance for hit testing ======
+  function dist(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return Math.sqrt(dx*dx+dy*dy); }
+
+  // distance from point p to segment a-b
+  function pointToSegmentDist(px,py,ax,ay,bx,by){
+    const vx = bx-ax, vy = by-ay; const wx = px-ax, wy = py-ay;
+    const c1 = vx*wx + vy*wy; if(c1<=0) return dist(px,py,ax,ay);
+    const c2 = vx*vx + vy*vy; if(c2<=c1) return dist(px,py,bx,by);
+    const t = c1/c2; const projx = ax + t*vx, projy = ay + t*vy; return dist(px,py,projx,projy);
+  }
+
+  // ====== Rendering functions ======
+  function drawBackground(time){
+    bgCtx.clearRect(0,0,w,h);
+    // subtle gradient milky band
+    const g = bgCtx.createLinearGradient(0,h*0.15,0,h*0.85);
+    g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(0.5,'rgba(255,255,255,0.02)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    bgCtx.fillStyle = g; bgCtx.fillRect(0,0,w,h);
+
+    // particles twinkle
+    for(const p of particles){
+      const a = p.alpha * (0.6 + 0.4*Math.sin(time*0.002 + p.phase));
+      bgCtx.beginPath(); bgCtx.globalAlpha = a; bgCtx.arc(p.x,p.y,p.r,0,Math.PI*2); bgCtx.fillStyle = 'white'; bgCtx.fill();
+    }
+    bgCtx.globalAlpha = 1;
+  }
+
+  function drawConstellations(){
+    mainCtx.clearRect(0,0,w,h);
+
+    // draw each constellation lines and stars
+    const filtered = getFilteredConstellations();
+    for(const c of filtered){
+      const isHover = (hovered === c.id);
+      // line style
+      mainCtx.lineJoin = 'round';
+      mainCtx.lineCap = 'round';
+      mainCtx.beginPath();
+      for(const conn of c.connections){
+        const a = c._pxStars[conn[0]]; const b = c._pxStars[conn[1]];
+        if(!a||!b) continue;
+        mainCtx.moveTo(a.x,a.y);
+        mainCtx.lineTo(b.x,b.y);
+      }
+      mainCtx.strokeStyle = c.color || '#fff';
+      mainCtx.lineWidth = isHover?2.6:1.2;
+      mainCtx.globalAlpha = isHover?0.95:0.6;
+      mainCtx.stroke();
+
+      // draw stars
+      for(const s of c._pxStars){
+        const glow = (isHover?10:4) + (s.size*1.2);
+        mainCtx.beginPath();
+        mainCtx.fillStyle = c.color || '#fff';
+        // outer glow
+        mainCtx.shadowColor = c.color || '#fff';
+        mainCtx.shadowBlur = glow;
+        mainCtx.globalAlpha = isHover?1:0.9;
+        mainCtx.arc(s.x,s.y,s.size,0,Math.PI*2);
+        mainCtx.fill();
+        // reset shadow
+        mainCtx.shadowBlur = 0; mainCtx.shadowColor = 'transparent';
+        // optionally draw a small core
+        mainCtx.beginPath(); mainCtx.fillStyle = '#fff'; mainCtx.arc(s.x,s.y,Math.max(0.6,s.size*0.35),0,Math.PI*2); mainCtx.fill();
+      }
+
+      // labels
+      if(labelsToggle.checked){
+        const first = c._pxStars[0];
+        mainCtx.fillStyle = 'rgba(255,255,255,0.85)';
+        mainCtx.font = '12px system-ui';
+        mainCtx.fillText(c.name, first.x + 8, first.y - 8);
+      }
+    }
+    mainCtx.globalAlpha = 1;
+  }
+
+  // draw thumbnail for info panel (single constellation)
+  function drawThumbnail(c){
+    // clear
+    thumbCtx.clearRect(0,0,thumbCanvas.width/dpr,thumbCanvas.height/dpr);
+    // scale to fit constellation bounds
+    const pad = 20;
+    const wpx = thumbCanvas.width/dpr, hpx = thumbCanvas.height/dpr;
+    // compute bounding box of stars
+    let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+    for(const s of c.stars){minx=Math.min(minx,s.x);miny=Math.min(miny,s.y);maxx=Math.max(maxx,s.x);maxy=Math.max(maxy,s.y);}
+    const bw = Math.max(0.2,maxx-minx); const bh = Math.max(0.2,maxy-miny);
+    const scale = Math.min((wpx-2*pad)/ (bw*w), (hpx-2*pad)/(bh*h));
+    // center
+    const cx = wpx/2, cy = hpx/2;
+    // draw lines
+    thumbCtx.save();
+    thumbCtx.translate(cx,cy);
+    thumbCtx.scale(scale,scale);
+    // transform normalized coords to centered coords
+    function tx(nx){ return ( (nx - (minx+maxx)/2) * w ); }
+    function ty(ny){ return ( (ny - (miny+maxy)/2) * h ); }
+    thumbCtx.lineWidth = 1/scale; thumbCtx.strokeStyle = c.color || '#fff'; thumbCtx.beginPath();
+    for(const conn of c.connections){
+      const a = c.stars[conn[0]]; const b = c.stars[conn[1]];
+      thumbCtx.moveTo(tx(a.x), ty(a.y)); thumbCtx.lineTo(tx(b.x), ty(b.y));
+    }
+    thumbCtx.stroke();
+    // stars
+    for(const s of c.stars){
+      thumbCtx.beginPath(); thumbCtx.fillStyle = c.color || '#fff'; thumbCtx.arc(tx(s.x),ty(s.y),Math.max(1,s.size),0,Math.PI*2); thumbCtx.fill();
+    }
+    thumbCtx.restore();
+  }
+
+  // ====== Interaction: hit-testing and events ======
+  function hitTest(x,y){
+    // returns constellation id if point hits star or near a connecting line
+    const filtered = getFilteredConstellations();
+    const padding = 8; // px
+    for(const c of filtered){
+      // stars
+      for(const s of c._pxStars){ if(dist(x,y,s.x,s.y) <= Math.max(6,s.size*3) + padding) return c.id; }
+      // lines
+      for(const conn of c.connections){
+        const a=c._pxStars[conn[0]]; const b=c._pxStars[conn[1]];
+        if(!a||!b) continue;
+        const d = pointToSegmentDist(x,y,a.x,a.y,b.x,b.y);
+        if(d <= 6 + padding) return c.id;
+      }
+    }
+    return null;
+  }
+
+  // get currently filtered constellations according to search
+  function getFilteredConstellations(){
+    const q = searchInput.value.trim().toLowerCase();
+    if(!q) return constellations;
+    return constellations.filter(c=>c.name.toLowerCase().includes(q));
+  }
+
+  // mouse move -> hover
+  function onPointerMove(e){
+    const rect = mainCanvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left);
+    const y = (e.clientY - rect.top);
+    const id = hitTest(x,y);
+    if(id !== hovered){ hovered = id; needsRedraw = true; }
+  }
+
+  function onPointerDown(e){
+    const rect = mainCanvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left);
+    const y = (e.clientY - rect.top);
+    const id = hitTest(x,y);
+    if(id){ openPanelFor(id); }
+  }
+
+  // keyboard navigation for constellation focus
+  function focusNext(offset=1){
+    const list = getFilteredConstellations(); if(list.length===0) return;
+    focusedIndex = (focusedIndex + offset + list.length) % list.length;
+    const c = list[focusedIndex];
+    a11yHints.textContent = `Focused ${c.name}`;
+    // move visual focus: we will set hovered so highlight follows
+    hovered = c.id; needsRedraw = true;
+    // set document focusable element for Enter key — we emulate by storing
+  }
+
+  // open info panel for constellation id
+  function openPanelFor(id){
+    const c = constellations.find(x=>x.id===id); if(!c) return;
+    openConstId = id;
+    panelTitle.textContent = c.name;
+    panelDesc.textContent = c.description;
+    panelStars.textContent = 'Stars: ' + c.stars.length;
+    panelId.textContent = c.id;
+    drawThumbnail(c);
+    infoPanel.classList.add('open');
+    infoPanel.setAttribute('aria-hidden','false');
+    needsRedraw = true;
+    // accessibility
+    a11yHints.textContent = `${c.name} info opened`;
+    // focus close button
+    closePanelBtn.focus();
+  }
+  function closePanel(){ infoPanel.classList.remove('open'); infoPanel.setAttribute('aria-hidden','true'); openConstId = null; needsRedraw=true; }
+
+  // ====== Search and labels toggle events ======
+  searchInput.addEventListener('input', ()=>{ focusedIndex = -1; needsRedraw=true; rebuildFallback(); });
+  labelsToggle.addEventListener('change', ()=>{ needsRedraw=true; });
+
+  // fallback list build
+  function rebuildFallback(){
+    const list = getFilteredConstellations();
+    fallbackList.innerHTML='';
+    for(const c of list){
+      const li = document.createElement('li');
+      const btn = document.createElement('button'); btn.textContent = c.name; btn.style.padding='6px 8px'; btn.style.border='1px solid rgba(255,255,255,0.06)'; btn.style.background='transparent'; btn.style.color='#fff';
+      btn.addEventListener('click',()=>openPanelFor(c.id));
+      li.appendChild(btn); fallbackList.appendChild(li);
+    }
+  }
+
+  // addConstellation: programmatically add and re-render
+  function addConstellation(obj){
+    // basic validation
+    if(!obj.id||!obj.name||!Array.isArray(obj.stars)) throw new Error('invalid constellation object');
+    constellations.push(JSON.parse(JSON.stringify(obj)));
+    recomputeMetrics(); rebuildFallback(); needsRedraw=true;
+  }
+
+  // ====== Event listeners ======
+  window.addEventListener('resize', ()=>{ recomputeMetrics(); needsRedraw=true; });
+  mainCanvas.addEventListener('pointermove', onPointerMove);
+  mainCanvas.addEventListener('pointerdown', onPointerDown);
+  mainCanvas.addEventListener('touchstart', (e)=>{
+    const t = e.touches[0]; onPointerMove(t); // show hover
+  }, {passive:true});
+  mainCanvas.addEventListener('click', onPointerDown);
+
+  document.addEventListener('keydown', (e)=>{
+    if(e.key === 'ArrowDown' || e.key === 'ArrowRight'){ focusNext(1); e.preventDefault(); }
+    if(e.key === 'ArrowUp' || e.key === 'ArrowLeft'){ focusNext(-1); e.preventDefault(); }
+    if(e.key === 'Enter' || e.key === ' '){ if(hovered) openPanelFor(hovered); }
+    if(e.key === 'Escape'){ if(openConstId) closePanel(); }
+  });
+
+  closePanelBtn.addEventListener('click', closePanel);
+
+  // ====== Main animation loop ======
+  let lastTime = performance.now();
+  function frame(t){
+    const dt = t - lastTime; lastTime = t;
+    // always animate background
+    drawBackground(t);
+    if(needsRedraw) drawConstellations();
+    // subtle fade of hover state when focus changes — we keep simple for perf
+    requestAnimationFrame(frame);
+  }
+
+  // ====== Initialization ======
+  function init(){
+    if(!mainCtx || !bgCtx){
+      // fallback for no-canvas
+      document.querySelectorAll('canvas').forEach(c=>c.style.display='none');
+      fallback.style.display='block'; rebuildFallback(); return;
+    }
+    recomputeMetrics(); rebuildFallback();
+    // initial draw
+    requestAnimationFrame(frame);
+  }
+
+  init();
+
+  // Expose for dev/debug
+  window.addConstellation = addConstellation;
+  window._CONSTELLATIONS = constellations;
+
+  </script>
+</body>
+</html>
